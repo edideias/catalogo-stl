@@ -1,9 +1,37 @@
 // Camada Android do Catálogo STL: implementa o mesmo `window.api` do Electron,
 // usando o plugin nativo "Saf" (acesso a pastas do celular) e o armazenamento do app.
 (function () {
-  const Cap = window.Capacitor;
-  const Saf = Cap.registerPlugin('Saf');
   document.documentElement.classList.add('mobile');
+  // Banner de erro visível (para não ficar tela vazia sem explicação)
+  const showErr = (msg) => {
+    try {
+      let b = document.getElementById('errBanner');
+      if (!b) {
+        b = document.createElement('div'); b.id = 'errBanner';
+        b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#7a1c1c;color:#fff;padding:10px 12px;font:13px sans-serif;max-height:40vh;overflow:auto;white-space:pre-wrap';
+        (document.body || document.documentElement).appendChild(b);
+      }
+      b.textContent = 'Erro: ' + msg;
+    } catch (_) {}
+  };
+  window.addEventListener('error', (e) => showErr(e.message + ' (' + (e.filename || '').split('/').pop() + ':' + e.lineno + ')'));
+  window.addEventListener('unhandledrejection', (e) => showErr(String(e.reason && e.reason.message || e.reason)));
+  // O Capacitor injeta window.Capacitor; sem bundler, os plugins nativos ficam em Capacitor.Plugins.
+  const capReady = () => new Promise((res) => {
+    let n = 0;
+    const t = setInterval(() => { if (window.Capacitor && (window.Capacitor.Plugins || window.Capacitor.registerPlugin) || ++n > 100) { clearInterval(t); res(window.Capacitor); } }, 50);
+  });
+  let _saf = null;
+  const getSaf = async () => {
+    if (_saf) return _saf;
+    const C = await capReady();
+    if (!C) throw new Error('Capacitor não carregou');
+    _saf = (C.Plugins && C.Plugins.Saf) || (C.registerPlugin && C.registerPlugin('Saf'));
+    if (!_saf) throw new Error('Plugin Saf não encontrado');
+    return _saf;
+  };
+  const Saf = new Proxy({}, { get: (_, name) => async (args) => (await getSaf())[name](args || {}) });
+  const Cap = { convertFileSrc: (u) => (window.Capacitor && window.Capacitor.convertFileSrc ? window.Capacitor.convertFileSrc(u) : u) };
 
   // ---------- util
   const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(8))).map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -234,8 +262,28 @@
       emit('patch', { remove: removed });
       return { removed: removed.length, errors };
     },
-    async pickDest() { return null; },
-    async move() { return { moved: 0, errors: ['Mover arquivos ainda não está disponível no celular'] }; },
+    async pickDest() {
+      // O Android abre o seletor de pastas e pede autorização de leitura/escrita na pasta escolhida.
+      return api.addRoot('stl');
+    },
+    async move(ids, dest) {
+      await whenReady();
+      const tree = db.rootUris[dest];
+      const errors = [];
+      let moved = 0;
+      if (!tree) return { moved: 0, errors: ['Pasta de destino inválida'] };
+      for (const id of ids) {
+        const e = db.entries[id];
+        if (!e) continue;
+        try {
+          const r = await Saf.moveDoc({ uri: e.uri, srcParent: e.parent, destTree: tree });
+          e.uri = r.uri; e.parent = r.parent; e.root = dest; e.dir = dest; e.path = dest + '/' + e.name;
+          pushPatch(e); moved++;
+        } catch (err) { errors.push(e.name + ': ' + (err && err.message || err)); }
+      }
+      rebuildIndex(); scheduleSave();
+      return { moved, errors };
+    },
     async rename(id, newName) {
       const e = db.entries[id];
       if (!e) return { error: 'Arquivo não encontrado' };
@@ -322,8 +370,8 @@
       const left = pendingCount();
       emit('thumbProgress', { left, total: Math.max(totalForProgress, left) });
     },
-    async thumbRegen() {
-      for (const e of Object.values(db.entries)) if (!e.missing && e.meta && e.meta.error) { e.meta = null; pushPatch(e); }
+    async thumbRegen(all) {
+      for (const e of Object.values(db.entries)) if (!e.missing && e.meta && (all || e.meta.error)) { e.meta = null; pushPatch(e); }
       totalForProgress = pendingCount();
       wake();
     },

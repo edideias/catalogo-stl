@@ -327,6 +327,51 @@ public class SafPlugin extends Plugin {
         }
     }
 
+    @PluginMethod
+    public void moveDoc(PluginCall call) {
+        String uri = call.getString("uri");
+        String srcParent = call.getString("srcParent");
+        String destTree = call.getString("destTree");
+        if (uri == null || srcParent == null || destTree == null) {
+            call.reject("parâmetros ausentes");
+            return;
+        }
+        try {
+            Uri tree = Uri.parse(destTree);
+            Uri dstParent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree));
+            Uri src = Uri.parse(uri);
+            Uri n = null;
+            try {
+                n = DocumentsContract.moveDocument(cr(), src, Uri.parse(srcParent), dstParent);
+            } catch (Exception ignored) { }
+            if (n == null) {
+                // fallback: copia e apaga o original
+                String name = "arquivo.stl";
+                String mime = "application/octet-stream";
+                Cursor c = cr().query(src, new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE}, null, null, null);
+                if (c != null) {
+                    try {
+                        if (c.moveToFirst()) { if (c.getString(0) != null) name = c.getString(0); if (c.getString(1) != null) mime = c.getString(1); }
+                    } finally { c.close(); }
+                }
+                n = DocumentsContract.createDocument(cr(), dstParent, mime, name);
+                if (n == null) { call.reject("Não foi possível criar o arquivo no destino"); return; }
+                try (InputStream in = cr().openInputStream(src); OutputStream out = cr().openOutputStream(n, "w")) {
+                    byte[] buf = new byte[65536];
+                    int r;
+                    while ((r = in.read(buf)) > 0) out.write(buf, 0, r);
+                }
+                if (!DocumentsContract.deleteDocument(cr(), src)) { call.reject("Copiado, mas não consegui apagar o original"); return; }
+            }
+            JSObject ret = new JSObject();
+            ret.put("uri", n.toString());
+            ret.put("parent", dstParent.toString());
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Falha ao mover: " + e.getMessage());
+        }
+    }
+
     // ------------------------------------------------------------ cópias no armazenamento do app
     @PluginMethod
     public void copyUriToApp(PluginCall call) {

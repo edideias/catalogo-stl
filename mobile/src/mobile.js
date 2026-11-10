@@ -22,10 +22,13 @@
   const visible = (el) => !el.hidden;
   const push = () => { history.pushState({ layer: pushed + 1 }, ''); pushed++; };
   new MutationObserver(() => { if (visible(viewer) && pushed < 1) push(); else if (!visible(viewer) && !visible(editor) && pushed > 0) { pushed = 0; } }).observe(viewer, { attributes: true, attributeFilter: ['hidden'] });
+  new MutationObserver(() => { if (!document.getElementById('settings').hidden) push(); }).observe(document.getElementById('settings'), { attributes: true, attributeFilter: ['hidden'] });
   new MutationObserver(() => { if (visible(editor) && pushed < 2) push(); }).observe(editor, { attributes: true, attributeFilter: ['hidden'] });
   btn.addEventListener('click', () => { if (root.classList.contains('drawer') && pushed < 1) { /* sem histórico extra para o menu */ } });
   window.addEventListener('popstate', () => {
     if (pushed > 0) pushed--;
+    const st = document.getElementById('settings');
+    if (!st.hidden && document.getElementById('dlg').hidden) { st.hidden = true; return; }
     if (visible(document.getElementById('dlg'))) { document.getElementById('dlgCancel').click(); return; }
     if (visible(editor)) { document.getElementById('edClose').click(); if (!visible(editor)) return; }
     else if (visible(viewer)) { document.getElementById('vClose').click(); }

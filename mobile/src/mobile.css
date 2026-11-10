@@ -7,7 +7,6 @@ html.mobile #grid, html.mobile .card { -webkit-touch-callout: none; user-select:
 html.mobile .card .star.off { opacity: .75; }
 html.mobile #tabs, html.mobile .zoom, html.mobile #btnRescan span { display: none; }
 html.mobile #btnMore { order: 4; }
-html.mobile [data-act="move"] { display: none; }
 
 #btnMenu { display: none; }
 html.mobile #btnMenu { display: inline-block; font-size: 20px; padding: 2px 12px; }
@@ -53,3 +52,12 @@ html.mobile #edInfo { font-size: 12px; max-width: 75%; }
 
 html.mobile .box { min-width: 0; width: 92vw; padding: 14px; }
 html.mobile #worker, html.mobile #thumbWorker { position: fixed; left: -400px; top: 0; width: 320px; height: 320px; border: 0; visibility: hidden; pointer-events: none; }
+
+/* configurações em tela cheia no celular */
+html.mobile #btnSettings { order: 2; font-size: 18px; padding: 2px 12px; }
+html.mobile #settings { align-items: stretch; }
+html.mobile .setBox { width: 100vw; max-height: none; height: 100vh; border-radius: 0; padding: calc(12px + env(safe-area-inset-top)) 14px calc(30px + env(safe-area-inset-bottom)); box-sizing: border-box; }
+html.mobile .setBox button.big { flex: 1; min-height: 48px; font-size: 16px; }
+html.mobile .setBox .row { display: flex; gap: 8px; margin-top: 10px; }
+html.mobile .setBox button { min-height: 44px; }
+html.mobile #setCard { min-height: 30px; }

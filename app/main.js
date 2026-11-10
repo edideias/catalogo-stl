@@ -535,9 +535,9 @@ function registerIpc() {
     send('thumb:progress', { left, total: Math.max(totalForProgress, left) });
   });
 
-  ipcMain.handle('thumb:regen', (_e) => {
+  ipcMain.handle('thumb:regen', (_e, all) => {
     for (const e of Object.values(db.entries)) {
-      if (!e.missing && e.meta && e.meta.error) { e.meta = null; pushPatch(e); }
+      if (!e.missing && e.meta && (all || e.meta.error)) { e.meta = null; pushPatch(e); }
     }
     totalForProgress = pendingCount();
     wakeWorker();

@@ -16,6 +16,7 @@ fs.copyFileSync(path.join(here, 'src', 'mobile.js'), path.join(www, 'renderer', 
 fs.copyFileSync(path.join(here, 'src', 'mobile.css'), path.join(www, 'renderer', 'mobile.css'));
 
 let html = fs.readFileSync(path.join(www, 'renderer', 'index.html'), 'utf8');
+html = html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, '');
 html = html.replace('<meta charset="utf-8">', '<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">');
 html = html.replace('<link rel="stylesheet" href="style.css">', '<link rel="stylesheet" href="style.css">\n<link rel="stylesheet" href="mobile.css">\n<script src="mobile-api.js"></script>');
 // mobile.js precisa rodar depois do DOM do cabeçalho existir: vai no fim do body

@@ -1,5 +1,6 @@
 import { parseStl, makeMaterial, addLights, THREE } from './stl.js';
 import { OrbitControls } from '../vendor/OrbitControls.js';
+import { initSettings, applySavedSettings } from './settings.js';
 import { initEditor, openEditor, _test as edTest } from './editor.js';
 import { loadScene, fitView, renderScene, NoPreview, LASER_LABEL } from './laser.js';
 
@@ -388,7 +389,7 @@ $('#selbar').addEventListener('click', async (ev) => {
     if (r.errors.length) await dialog({ title: 'Alguns arquivos não foram movidos', body: '<pre style="white-space:pre-wrap;max-width:560px">' + esc(r.errors.slice(0, 15).join('\n')) + '</pre>', cancel: null });
     state.selected.clear();
   } else if (act === 'trash') {
-    const ok = await dialog({ title: 'Mandar para a lixeira?', body: `<p>${ids.length} arquivo(s) serão enviados para a <b>Lixeira</b> do Windows (dá para restaurar de lá).</p>`, ok: 'Mandar para a lixeira' });
+    const ok = await dialog({ title: 'Mandar para a lixeira?', body: document.documentElement.classList.contains('mobile') ? `<p>${ids.length} arquivo(s) serão <b>apagados do celular</b>. Não dá para desfazer.</p>` : `<p>${ids.length} arquivo(s) serão enviados para a <b>Lixeira</b> do Windows (dá para restaurar de lá).</p>`, ok: document.documentElement.classList.contains('mobile') ? 'Apagar' : 'Mandar para a lixeira' });
     if (!ok) return;
     const r = await api.trash(ids);
     setStatus(`${r.removed} arquivo(s) na lixeira`, 1);
@@ -924,5 +925,7 @@ window.__test = {
   report: () => JSON.stringify({ spinCanvas: document.querySelectorAll('canvas.spin').length, mode: state.mode, entries: state.entries.size, list: state.list.length, withThumb: modeEntries().filter(hasThumb).length, errors: modeEntries().filter((e) => e.meta && e.meta.error).length, items: state.list.map((e) => ({ n: e.name, m: e.meta })) }),
 };
 
+applySavedSettings({ state, $ });
+initSettings({ api, state, $, esc, fmtNum, dialog, setStatus, refreshAll: () => refreshAll() });
 setMode(state.mode, true);
 load();
