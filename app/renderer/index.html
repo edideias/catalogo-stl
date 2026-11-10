@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>Catálogo STL</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data: blob:; worker-src 'self' blob:; connect-src 'self' blob: file:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data: blob:; worker-src 'self' blob:; connect-src 'self' blob: file:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -97,6 +97,7 @@
     <div id="vPath" class="muted"></div>
     <table id="vTable"></table>
     <div class="row"><button id="vFav">☆ Favorito</button><button id="vShow">Mostrar na pasta</button><button id="vOpen">Abrir no programa</button><button id="vRename">Renomear</button></div>
+    <div class="row"><button id="vEdit" class="primary">✎ Editar 3D</button><button id="vRestore" hidden>Restaurar versão anterior</button></div>
     <label>Tags</label>
     <div id="vTags"></div>
     <div class="row"><input id="vTagIn" placeholder="nova tag + Enter" list="tagList"><datalist id="tagList"></datalist></div>
@@ -104,6 +105,9 @@
     <textarea id="vNote" rows="4" placeholder="Observações (material, escala, suporte, origem…)"></textarea>
   </div>
 </div>
+
+<!-- Editor 3D -->
+<div id="editor" hidden></div>
 
 <!-- Diálogo genérico -->
 <div id="dlg" hidden>

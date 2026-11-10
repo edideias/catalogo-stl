@@ -376,6 +376,75 @@ function registerIpc() {
     }
   });
 
+
+  // ---------------- editor 3D
+  const backupsDir = () => path.join(userData(), 'backups');
+  ipcMain.handle('edit:save', async (_e, id, mode, data, name) => {
+    const e = db.entries[id];
+    if (!e) return { error: 'Arquivo não encontrado' };
+    const buf = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+    try {
+      if (mode === 'overwrite') {
+        await fsp.mkdir(backupsDir(), { recursive: true });
+        const bk = path.join(backupsDir(), `${e.id}_${Date.now()}.stl`);
+        await fsp.copyFile(e.path, bk);
+        e.backups = [...(e.backups || []), bk].slice(-5);
+        await fsp.writeFile(e.path, buf);
+        const st = await fsp.stat(e.path);
+        e.size = st.size; e.mtime = Math.round(st.mtimeMs); e.meta = null; delete e.hash;
+        pushPatch(e); totalForProgress = pendingCount(); wakeWorker();
+        return { ok: true, name: e.name };
+      }
+      const clean = String(name || path.basename(e.name, '.stl') + '_editado').replace(/[\\/:*?"<>|]/g, '_').trim() || 'modelo_editado';
+      const target = await uniquePath(e.dir, clean + '.stl');
+      await fsp.writeFile(target, buf);
+      const st = await fsp.stat(target);
+      const nid = newId();
+      const ne = {
+        id: nid, kind: 'stl', ext: 'stl', path: target, name: path.basename(target), dir: path.dirname(target), root: rootOf(target, 'stl') || e.root,
+        size: st.size, mtime: Math.round(st.mtimeMs), tags: [...(e.tags || [])], fav: false, note: '', meta: null, missing: false,
+      };
+      db.entries[nid] = ne;
+      byPath.set(norm(target), nid);
+      pushPatch(ne); totalForProgress = pendingCount(); wakeWorker();
+      return { ok: true, id: nid, name: ne.name, path: target };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('edit:restore', async (_e, id) => {
+    const e = db.entries[id];
+    if (!e || !e.backups || !e.backups.length) return { error: 'Não há versão anterior' };
+    const bk = e.backups[e.backups.length - 1];
+    try {
+      await fsp.copyFile(bk, e.path);
+      const st = await fsp.stat(e.path);
+      e.size = st.size; e.mtime = Math.round(st.mtimeMs); e.meta = null; delete e.hash;
+      e.backups = e.backups.slice(0, -1);
+      try { await fsp.unlink(bk); } catch (_) {}
+      pushPatch(e); totalForProgress = pendingCount(); wakeWorker();
+      return { ok: true };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('file:pickStl', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Escolher STL', filters: [{ name: 'STL', extensions: ['stl'] }], properties: ['openFile'] });
+    return r.canceled ? null : r.filePaths[0];
+  });
+
+  ipcMain.handle('font:get', async (_e, bold) => {
+    const cands = process.platform === 'win32'
+      ? (bold ? ['arialbd.ttf', 'segoeuib.ttf', 'arial.ttf'] : ['arial.ttf', 'segoeui.ttf']).map((f) => path.join(process.env.WINDIR || 'C:\\Windows', 'Fonts', f))
+      : (bold ? ['/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'] : ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf']);
+    for (const f of cands) {
+      try { const b = await fsp.readFile(f); return new Uint8Array(b.buffer, b.byteOffset, b.byteLength); } catch (_) {}
+    }
+    return null;
+  });
+
   ipcMain.handle('missing:clear', (_e, kind) => {
     const removed = [];
     for (const e of Object.values(db.entries)) {
@@ -608,6 +677,84 @@ async function runTest() {
       await snap('4-laser-' + want.replace(/\W/g, '_'));
       await js(`window.__test.closeViewer()`);
     }
+  }
+  if (process.env.CAT_TEST_EDIT) {
+    const logs = [];
+    win.webContents.on('console-message', (_e, lvl, msg) => { if (lvl >= 2) logs.push(msg); });
+    const ed = {};
+    const q = async (c) => { try { return await js(c); } catch (err) { return 'ERRO: ' + err.message; } };
+    await js(`window.__test.setMode('stl')`);
+    await js(`window.__test.openFirst()`);
+    await sleep(1500);
+    await js(`window.__test.edit.open()`);
+    await sleep(2500);
+    ed.opened = await q(`window.__test.edit.info()`);
+    await snap('5-editor');
+    // transformar
+    await q(`window.__test.edit.click('[data-rot="x,90"]')`); await sleep(500);
+    ed.afterRotX = await q(`window.__test.edit.info()`);
+    await q(`window.__test.edit.click('[data-mir="x"]')`); await sleep(400);
+    await q(`window.__test.edit.set('#edPct', 50)`); await q(`window.__test.edit.click('#edApplyPct')`); await sleep(400);
+    ed.afterScale = await q(`window.__test.edit.info()`);
+    await q(`window.__test.edit.click('#edUndo')`); await sleep(300);
+    ed.afterUndo = await q(`window.__test.edit.info()`);
+    await q(`window.__test.edit.click('#edRedo')`); await sleep(300);
+    await snap('5b-transform');
+    // reparar
+    await q(`window.__test.edit.click('[data-tab=repair]')`);
+    await q(`window.__test.edit.click('#edAnalyze')`); await sleep(1500);
+    ed.analyze = await q(`window.__test.edit.report()`);
+    await q(`window.__test.edit.click('#edRepairAll')`); await sleep(2500);
+    ed.repair = await q(`window.__test.edit.report()`);
+    await q(`window.__test.edit.set('#edDecRange', 50)`);
+    await q(`window.__test.edit.click('#edDecimate')`); await sleep(3000);
+    ed.decimate = await q(`window.__test.edit.report()`);
+    await snap('5c-repair');
+    // cortar
+    await q(`window.__test.edit.click('[data-tab=cut]')`); await sleep(400);
+    await snap('5d-cut');
+    await q(`window.__test.edit.click('#edCutKeepA')`); await sleep(2500);
+    ed.afterCut = await q(`window.__test.edit.info()`);
+    // juntar / furar
+    await q(`window.__test.edit.click('[data-tab=join]')`);
+    await q(`window.__test.edit.click('[data-tool=cyl]')`); await sleep(600);
+    await snap('5e-tool');
+    await q(`window.__test.edit.click('#edOpSub')`); await sleep(4000);
+    ed.afterSub = await q(`window.__test.edit.info()`);
+    await q(`window.__test.edit.set('#edText', 'OLA')`);
+    await q(`window.__test.edit.click('#edTextMake')`); await sleep(1500);
+    await snap('5f-text');
+    await q(`window.__test.edit.click('#edOpAdd')`); await sleep(4000);
+    ed.afterText = await q(`window.__test.edit.info()`);
+    await snap('5g-final');
+    // salvar como novo (direto via IPC para evitar diálogo)
+    // corte com pinos (dividir em 2 arquivos) + sobrescrever/restaurar
+    await q(`window.__test.edit.click('#edClose')`); await sleep(500);
+    await q(`document.querySelector('#dlgOk').click()`); await sleep(500);
+    await q(`window.__test.closeViewer()`);
+    await q(`(()=>{const i=window.__test.report(); const l=JSON.parse(i).items.findIndex(x=>x.n==='caixa.stl'); window.__test.openIndex(l); })()`); await sleep(1500);
+    await q(`window.__test.edit.open()`); await sleep(2500);
+    ed.caixa = await q(`window.__test.edit.info()`);
+    await q(`window.__test.edit.t.setTab('cut')`);
+    await q(`window.__test.edit.set('#edCutAxis', 2)`);
+    await q(`document.querySelector('#editor #edPins').click()`);
+    const before = Object.keys(db.entries).length;
+    await q(`window.__test.edit.click('#edCutSplit')`); await sleep(9000);
+    ed.splitNewEntries = Object.keys(db.entries).length - before;
+    ed.splitDialog = await q(`document.querySelector('#dlgBody').textContent`);
+    await snap('5h-split');
+    await q(`document.querySelector('#dlgOk').click()`);
+    const e0 = Object.values(db.entries).find((x) => x.name === 'caixa.stl');
+    const size0 = fs.statSync(e0.path).size;
+    const r1 = await q(`(async()=>{const m=window.__test.edit.t.state.mesh; return 'ok'})()`);
+    const data = Buffer.alloc(84 + 50); data.writeUInt32LE(1, 80);
+    ed.overwriteRes = await q(`window.api.editSave('${e0.id}','overwrite', new Uint8Array(${JSON.stringify([...data])}))`);
+    ed.sizeAfterOverwrite = fs.statSync(e0.path).size; ed.sizeBefore = size0;
+    ed.backups = (db.entries[e0.id].backups || []).length;
+    ed.restoreRes = await q(`window.api.editRestore('${e0.id}')`);
+    ed.sizeAfterRestore = fs.statSync(e0.path).size;
+    ed.errors = logs;
+    rep.editor = ed;
   }
   fs.writeFileSync(path.join(shots, 'report.txt'), JSON.stringify(rep, null, 1));
   saveNow();

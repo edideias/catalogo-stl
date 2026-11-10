@@ -1,5 +1,6 @@
 import { parseStl, makeMaterial, addLights, THREE } from './stl.js';
 import { OrbitControls } from '../vendor/OrbitControls.js';
+import { initEditor, openEditor, _test as edTest } from './editor.js';
 import { loadScene, fitView, renderScene, NoPreview, LASER_LABEL } from './laser.js';
 
 const $ = (s) => document.querySelector(s);
@@ -705,6 +706,8 @@ function updateViewerInfo() {
     ['Modificado', new Date(e.mtime).toLocaleDateString('pt-BR')],
   ];
   $('#vTable').innerHTML = rows.filter(Boolean).map(([a, b]) => `<tr><td class="muted">${a}</td><td>${b}</td></tr>`).join('');
+  $('#vEdit').hidden = e.kind !== 'stl';
+  $('#vRestore').hidden = !(e.backups && e.backups.length);
   $('#vFav').textContent = e.fav ? '★ Favorito' : '☆ Favorito';
   $('#vTags').innerHTML = e.tags.map((t) => `<span class="tag-pill">#${esc(t)} <b data-rm="${esc(t)}">✕</b></span>`).join('') || '<span class="muted">sem tags</span>';
   const note = $('#vNote');
@@ -763,6 +766,23 @@ $('#vRename').onclick = async () => {
   const r = await api.rename(vEntry.id, n);
   if (r.error) await dialog({ title: 'Não deu', body: '<p>' + esc(r.error) + '</p>', cancel: null });
 };
+initEditor({
+  api, dialog, promptText, setStatus, fmtNum, esc,
+  onClosed: () => { if (vEntry) { updateViewerInfo(); loadInViewer(vEntry); } },
+});
+$('#vEdit').onclick = () => {
+  if (!vEntry || vEntry.kind !== 'stl') return;
+  disposeStlViewer();
+  openEditor(vEntry);
+};
+$('#vRestore').onclick = async () => {
+  if (!vEntry) return;
+  const ok = await dialog({ title: 'Restaurar versão anterior?', body: '<p>O arquivo volta para a versão que existia antes da última sobrescrita.</p>', ok: 'Restaurar' });
+  if (!ok) return;
+  const r = await api.editRestore(vEntry.id);
+  if (r.error) await dialog({ title: 'Não deu', body: '<p>' + esc(r.error) + '</p>', cancel: null });
+  else { setStatus('Versão anterior restaurada', 1); setTimeout(() => vEntry && loadInViewer(vEntry), 600); }
+};
 $('#vTagIn').addEventListener('keydown', async (ev) => {
   if (ev.key !== 'Enter' || !vEntry) return;
   const t = parseTags(ev.target.value);
@@ -778,6 +798,7 @@ $('#vNote').addEventListener('input', debounce((ev) => { if (vEntry) api.update(
 document.addEventListener('keydown', (ev) => {
   if (!$('#dlg').hidden || !$('#dupPanel').hidden) return;
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName);
+  if (!$('#editor').hidden) return;
   if (viewerOpen) {
     if (ev.key === 'Escape') closeViewer();
     else if (!typing && ev.key === 'ArrowLeft') stepViewer(-1);
@@ -892,6 +913,14 @@ window.__test = {
   openIndex: (i) => openViewer(i),
   closeViewer,
   hoverFirst: () => { const c = document.querySelector('.card'); if (c) { stopHover(); startHover(c); } },
+  edit: {
+    open: () => { $('#vEdit').click(); },
+    t: edTest,
+    info: () => $('#edInfo') && $('#edInfo').textContent,
+    click: (sel) => { const b = document.querySelector('#editor ' + sel); if (b) b.click(); return !!b; },
+    set: (sel, v) => { const b = document.querySelector('#editor ' + sel); b.value = v; b.dispatchEvent(new Event('input')); b.dispatchEvent(new Event('change')); },
+    report: () => document.querySelector('#edReport').textContent,
+  },
   report: () => JSON.stringify({ spinCanvas: document.querySelectorAll('canvas.spin').length, mode: state.mode, entries: state.entries.size, list: state.list.length, withThumb: modeEntries().filter(hasThumb).length, errors: modeEntries().filter((e) => e.meta && e.meta.error).length, items: state.list.map((e) => ({ n: e.name, m: e.meta })) }),
 };
 
