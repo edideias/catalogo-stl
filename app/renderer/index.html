@@ -3,11 +3,12 @@
 <head>
 <meta charset="utf-8">
 <title>Catálogo STL</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data: blob:; worker-src 'self' blob:; connect-src 'self' blob: file:; style-src 'self' 'unsafe-inline'; script-src 'self'">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header id="top">
+  <div id="tabs"><button class="tab" data-mode="stl">🧊 3D (STL)</button><button class="tab" data-mode="laser">✂ Laser / CNC</button></div>
   <button id="btnAdd" class="primary">＋ Adicionar pasta</button>
   <button id="btnRescan" title="Procurar arquivos novos nas pastas">⟳ Atualizar</button>
   <input id="search" type="search" placeholder="Buscar por nome, pasta, tag ou nota…" autocomplete="off">
@@ -47,8 +48,8 @@
 
   <section id="content">
     <div id="empty" hidden>
-      <h2>Vamos organizar essa pasta gigante</h2>
-      <p>Clique em <b>＋ Adicionar pasta</b> e escolha a pasta onde estão seus arquivos STL.<br>O programa varre tudo (inclusive subpastas), gera miniaturas e deixa você buscar, marcar e mover.</p>
+      <h2 id="emptyTitle"></h2>
+      <p id="emptyText"></p>
       <button id="btnAdd2" class="primary big">＋ Adicionar pasta</button>
     </div>
     <div id="crumb"></div>
@@ -75,11 +76,18 @@
     <div id="vCanvas"></div>
     <div id="vDims"></div>
     <div id="vTools">
+      <button id="vSpin" class="on" title="Giro automático (barra de espaço)">⟳ Girar</button>
+      <span class="grp"><button data-view="iso" title="Tecla 1">Iso</button><button data-view="front" title="Tecla 2">Frente</button><button data-view="side" title="Tecla 3">Lado</button><button data-view="top" title="Tecla 4">Topo</button></span>
       <button id="vWire">Malha</button>
       <button id="vGrid" class="on">Grade</button>
       <button id="vAxes">Eixos</button>
       <button id="vReset">Recentrar</button>
     </div>
+    <div id="lTools" hidden>
+      <button id="lFit">Ajustar à tela</button>
+      <button id="lBg">Fundo escuro</button>
+    </div>
+    <div id="vHint"></div>
     <button id="vPrev" class="nav">‹</button>
     <button id="vNext" class="nav">›</button>
     <button id="vClose" title="Fechar (Esc)">✕</button>
@@ -88,7 +96,7 @@
     <h3 id="vName"></h3>
     <div id="vPath" class="muted"></div>
     <table id="vTable"></table>
-    <div class="row"><button id="vFav">☆ Favorito</button><button id="vShow">Mostrar na pasta</button><button id="vRename">Renomear</button></div>
+    <div class="row"><button id="vFav">☆ Favorito</button><button id="vShow">Mostrar na pasta</button><button id="vOpen">Abrir no programa</button><button id="vRename">Renomear</button></div>
     <label>Tags</label>
     <div id="vTags"></div>
     <div class="row"><input id="vTagIn" placeholder="nova tag + Enter" list="tagList"><datalist id="tagList"></datalist></div>

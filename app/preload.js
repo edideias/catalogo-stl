@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('api', {
   bulk: inv('entry:bulk'),
   renameTag: inv('tags:rename'),
   readFile: inv('file:read'),
+  laserPaths: inv('laser:paths'),
+  laserPreview: inv('laser:preview'),
   showInFolder: inv('file:show'),
   openFile: inv('file:open'),
   trash: inv('file:trash'),

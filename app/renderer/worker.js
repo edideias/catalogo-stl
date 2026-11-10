@@ -1,4 +1,5 @@
 import { parseStl, makeMaterial, addLights, THREE } from './stl.js';
+import { loadScene, fitView, renderScene, sceneInfo, NoPreview } from './laser.js';
 
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true, alpha: false });
@@ -13,7 +14,23 @@ const material = makeMaterial();
 
 const MAX_BYTES = 350 * 1024 * 1024;
 
+const c2 = document.createElement('canvas');
+c2.width = 320; c2.height = 320;
+async function processLaser(job) {
+  try {
+    const scene = await loadScene(job, { maxSide: 900 });
+    const ctx = c2.getContext('2d');
+    renderScene(ctx, scene, 320, 320, fitView(scene, 320, 320, 14), { bg: '#f1f3f7' });
+    const info = sceneInfo(scene);
+    return { thumb: c2.toDataURL('image/jpeg', 0.85), meta: { laser: true, ext: job.ext, ...info } };
+  } catch (e) {
+    if (e instanceof NoPreview) return { thumb: null, meta: { laser: true, ext: job.ext, thumb: false } };
+    throw e;
+  }
+}
+
 async function process(job) {
+  if (job.kind === 'laser') return processLaser(job);
   const u8 = await window.api.readFile(job.path);
   if (u8.byteLength > MAX_BYTES) return { thumb: null, meta: { error: 'grande' } };
   const { geo, meta } = parseStl(u8);

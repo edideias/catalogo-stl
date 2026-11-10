@@ -3,6 +3,14 @@ const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
 const crypto = require('crypto');
+const laser = require('./laser-main');
+
+const KINDS = {
+  stl: ['.stl'],
+  laser: ['.svg', '.dxf', '.ai', '.eps', '.pdf', '.cdr', '.plt', '.hpgl', '.lbrn', '.lbrn2', '.gcode', '.nc', '.ngc', '.tap', '.dwg'],
+};
+const rootsKey = (kind) => (kind === 'laser' ? 'rootsLaser' : 'roots');
+const rootsFor = (kind) => db[rootsKey(kind)];
 
 if (process.env.CAT_TEST) {
   app.commandLine.appendSwitch('no-sandbox');
@@ -20,7 +28,7 @@ const thumbsDir = () => path.join(userData(), 'thumbs');
 const catalogFile = () => path.join(userData(), 'catalogo.json');
 
 // ---------------------------------------------------------------- catalogo
-let db = { version: 1, roots: [], entries: {} };
+let db = { version: 2, roots: [], rootsLaser: [], entries: {} };
 let byPath = new Map(); // chave normalizada do caminho -> id
 let saveTimer = null;
 
@@ -39,6 +47,8 @@ function loadDb() {
       if (j && j.entries) db = j;
     } catch (_) {}
   }
+  if (!db.rootsLaser) db.rootsLaser = [];
+  for (const e of Object.values(db.entries)) if (!e.kind) e.kind = 'stl';
   rebuildIndex();
 }
 
@@ -66,12 +76,12 @@ function saveNow() {
   }
 }
 
-function rootOf(p) {
+function rootOf(p, kind) {
   const n = norm(p);
   let best = null;
-  for (const r of db.roots) {
-    const rn = norm(r);
-    if (n === rn || n.startsWith(rn + path.sep) || n.startsWith(rn.endsWith(path.sep) ? rn : rn + path.sep)) {
+  for (const r of rootsFor(kind || 'stl')) {
+    const rn = norm(r).replace(/[\\/]+$/, '');
+    if (n === rn || n.startsWith(rn + path.sep)) {
       if (!best || r.length > best.length) best = r;
     }
   }
@@ -112,7 +122,7 @@ function pendingCount() {
 let totalForProgress = 0;
 
 // ---------------------------------------------------------------- escaneamento
-async function* walk(dir, signal) {
+async function* walk(dir, signal, exts) {
   let handle;
   try {
     handle = await fsp.opendir(dir);
@@ -124,15 +134,15 @@ async function* walk(dir, signal) {
     const full = path.join(dir, d.name);
     if (d.isDirectory()) {
       if (d.name.startsWith('.') || d.name === '$RECYCLE.BIN' || d.name === 'System Volume Information' || d.name === 'node_modules') continue;
-      yield* walk(full, signal);
-    } else if (d.isFile() && d.name.toLowerCase().endsWith('.stl')) {
+      yield* walk(full, signal, exts);
+    } else if (d.isFile() && exts.includes(path.extname(d.name).toLowerCase())) {
       yield full;
     }
   }
 }
 
 let scanning = false;
-async function scanRoots(roots) {
+async function scanRoots(roots, kind = 'stl') {
   if (scanning) return { busy: true };
   scanning = true;
   const signal = { cancel: false };
@@ -141,11 +151,11 @@ async function scanRoots(roots) {
   const completed = [];
   try {
     for (const root of roots) {
-      send('scan:progress', { root, found, phase: 'scan' });
+      send('scan:progress', { root, found, kind });
       let ok = true;
       try { await fsp.access(root); } catch (_) { ok = false; }
       if (!ok) continue;
-      for await (const full of walk(root, signal)) {
+      for await (const full of walk(root, signal, KINDS[kind])) {
         let st;
         try { st = await fsp.stat(full); } catch (_) { continue; }
         found++;
@@ -156,7 +166,7 @@ async function scanRoots(roots) {
         if (!e) {
           id = newId();
           e = {
-            id, path: full, name: path.basename(full), dir: path.dirname(full), root: rootOf(full) || root,
+            id, kind, ext: path.extname(full).slice(1).toLowerCase(), path: full, name: path.basename(full), dir: path.dirname(full), root: rootOf(full, kind) || root,
             size: st.size, mtime: Math.round(st.mtimeMs), tags: [], fav: false, note: '', meta: null, missing: false,
           };
           db.entries[id] = e;
@@ -169,12 +179,12 @@ async function scanRoots(roots) {
           if (e.size !== st.size || e.mtime !== Math.round(st.mtimeMs)) {
             e.size = st.size; e.mtime = Math.round(st.mtimeMs); e.meta = null; dirty = true; changed++;
           }
-          const r = rootOf(full) || root;
+          const r = rootOf(full, kind) || root;
           if (e.root !== r) { e.root = r; dirty = true; }
           if (dirty) pushPatch(e);
         }
         if (found % 250 === 0) {
-          send('scan:progress', { root, found, phase: 'scan' });
+          send('scan:progress', { root, found, kind });
           await new Promise((r) => setImmediate(r));
         }
       }
@@ -183,14 +193,14 @@ async function scanRoots(roots) {
     // marca como ausentes o que sumiu das pastas varridas com sucesso
     let missingNow = 0;
     for (const e of Object.values(db.entries)) {
-      if (!e.missing && completed.some((r) => rootOf(e.path) === r) && !seen.has(norm(e.path))) {
+      if (e.kind === kind && !e.missing && completed.some((r) => rootOf(e.path, kind) === r) && !seen.has(norm(e.path))) {
         e.missing = true; missingNow++; pushPatch(e);
       }
     }
     scheduleSave();
     totalForProgress = pendingCount();
     wakeWorker();
-    send('scan:done', { found, added, changed, missing: missingNow });
+    send('scan:done', { found, added, changed, missing: missingNow, kind });
     return { found, added, changed, missing: missingNow };
   } finally {
     scanning = false;
@@ -199,37 +209,50 @@ async function scanRoots(roots) {
 
 // ---------------------------------------------------------------- IPC
 function registerIpc() {
+  const sendRoots = () => send('catalog:roots', { stl: db.roots, laser: db.rootsLaser });
+
   ipcMain.handle('catalog:get', () => ({
-    roots: db.roots,
+    roots: { stl: db.roots, laser: db.rootsLaser },
     entries: Object.values(db.entries),
     thumbsDir: thumbsDir(),
     pending: pendingCount(),
   }));
 
-  ipcMain.handle('roots:add', async () => {
-    const r = await dialog.showOpenDialog(win, { title: 'Escolha a pasta com seus STL', properties: ['openDirectory'] });
+  ipcMain.handle('roots:add', async (_e, kind) => {
+    const r = await dialog.showOpenDialog(win, {
+      title: kind === 'laser' ? 'Escolha a pasta com seus arquivos de laser/CNC' : 'Escolha a pasta com seus STL',
+      properties: ['openDirectory'],
+    });
     if (r.canceled || !r.filePaths[0]) return null;
     const p = r.filePaths[0];
-    if (!db.roots.some((x) => norm(x) === norm(p))) db.roots.push(p);
+    const list = rootsFor(kind);
+    if (!list.some((x) => norm(x) === norm(p))) list.push(p);
     scheduleSave();
-    send('catalog:roots', db.roots);
+    sendRoots();
     return p;
   });
 
-  ipcMain.handle('roots:remove', (_e, root) => {
-    db.roots = db.roots.filter((r) => norm(r) !== norm(root));
+  ipcMain.handle('roots:remove', (_e, kind, root) => {
+    db[rootsKey(kind)] = rootsFor(kind).filter((r) => norm(r) !== norm(root));
     const removed = [];
     for (const e of Object.values(db.entries)) {
-      if (norm(e.root || '') === norm(root)) { removed.push(e.id); delete db.entries[e.id]; }
+      if (e.kind === kind && norm(e.root || '') === norm(root)) { removed.push(e.id); delete db.entries[e.id]; }
     }
     rebuildIndex();
     scheduleSave();
-    send('catalog:roots', db.roots);
+    sendRoots();
     send('catalog:patch', { remove: removed });
     return removed.length;
   });
 
-  ipcMain.handle('scan:run', (_e, roots) => scanRoots(roots && roots.length ? roots : db.roots));
+  ipcMain.handle('scan:run', (_e, kind, roots) => scanRoots(roots && roots.length ? roots : rootsFor(kind), kind));
+
+  ipcMain.handle('laser:paths', async (_e, p, ext) => {
+    try { return await laser.parseVector(p, ext); } catch (err) { return { error: String(err.message || err) }; }
+  });
+  ipcMain.handle('laser:preview', async (_e, p, ext) => {
+    try { return await laser.extractPreview(p, ext); } catch (err) { return null; }
+  });
 
   ipcMain.handle('entry:update', (_e, id, patch) => {
     const e = db.entries[id];
@@ -304,9 +327,11 @@ function registerIpc() {
   ipcMain.handle('file:move', async (_e, ids, destDir) => {
     let moved = 0;
     const errors = [];
-    if (!db.roots.some((r) => norm(r) === norm(destDir)) && !rootOf(destDir)) {
-      db.roots.push(destDir);
-      send('catalog:roots', db.roots);
+    const first = db.entries[ids[0]];
+    const kind = first ? first.kind : 'stl';
+    if (!rootOf(destDir, kind)) {
+      rootsFor(kind).push(destDir);
+      sendRoots();
     }
     for (const id of ids) {
       const e = db.entries[id];
@@ -319,7 +344,7 @@ function registerIpc() {
         e.path = target;
         e.name = path.basename(target);
         e.dir = path.dirname(target);
-        e.root = rootOf(target) || destDir;
+        e.root = rootOf(target, e.kind) || destDir;
         byPath.set(norm(target), id);
         pushPatch(e);
         moved++;
@@ -335,7 +360,8 @@ function registerIpc() {
     if (!e) return { error: 'Arquivo não encontrado' };
     let n = newName.replace(/[\\/:*?"<>|]/g, '_').trim();
     if (!n) return { error: 'Nome vazio' };
-    if (!n.toLowerCase().endsWith('.stl')) n += '.stl';
+    const ext0 = path.extname(e.name);
+    if (!n.toLowerCase().endsWith(ext0.toLowerCase())) n += ext0;
     const target = path.join(e.dir, n);
     if (norm(target) !== norm(e.path) && fs.existsSync(target)) return { error: 'Já existe um arquivo com esse nome' };
     try {
@@ -350,10 +376,10 @@ function registerIpc() {
     }
   });
 
-  ipcMain.handle('missing:clear', () => {
+  ipcMain.handle('missing:clear', (_e, kind) => {
     const removed = [];
     for (const e of Object.values(db.entries)) {
-      if (e.missing) { removed.push(e.id); delete db.entries[e.id]; }
+      if (e.missing && e.kind === kind) { removed.push(e.id); delete db.entries[e.id]; }
     }
     rebuildIndex();
     scheduleSave();
@@ -361,10 +387,10 @@ function registerIpc() {
     return removed.length;
   });
 
-  ipcMain.handle('dup:find', async () => {
+  ipcMain.handle('dup:find', async (_e, kind) => {
     const bySize = new Map();
     for (const e of Object.values(db.entries)) {
-      if (e.missing) continue;
+      if (e.missing || e.kind !== kind) continue;
       if (!bySize.has(e.size)) bySize.set(e.size, []);
       bySize.get(e.size).push(e);
     }
@@ -392,7 +418,7 @@ function registerIpc() {
     return groups;
   });
 
-  ipcMain.handle('export:csv', async () => {
+  ipcMain.handle('export:csv', async (_e, kind) => {
     const r = await dialog.showSaveDialog(win, {
       title: 'Exportar catálogo', defaultPath: 'catalogo-stl.csv',
       filters: [{ name: 'CSV', extensions: ['csv'] }],
@@ -401,6 +427,7 @@ function registerIpc() {
     const q = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
     const lines = ['Nome;Pasta;Tamanho (bytes);X (mm);Y (mm);Z (mm);Triangulos;Volume (cm3);Tags;Favorito;Nota;Modificado'];
     for (const e of Object.values(db.entries)) {
+      if (e.kind !== kind) continue;
       const m = e.meta || {};
       lines.push([
         q(e.name), q(e.dir), e.size, m.dx ?? '', m.dy ?? '', m.dz ?? '', m.tris ?? '', m.vol != null ? (m.vol / 1000).toFixed(2) : '',
@@ -415,7 +442,7 @@ function registerIpc() {
   ipcMain.handle('thumb:next', () => {
     for (const e of Object.values(db.entries)) {
       if (!e.missing && !e.meta) {
-        return { id: e.id, path: e.path };
+        return { id: e.id, path: e.path, kind: e.kind, ext: e.ext || path.extname(e.path).slice(1).toLowerCase() };
       }
     }
     workerIdle = true;
@@ -439,7 +466,7 @@ function registerIpc() {
     send('thumb:progress', { left, total: Math.max(totalForProgress, left) });
   });
 
-  ipcMain.handle('thumb:regen', () => {
+  ipcMain.handle('thumb:regen', (_e) => {
     for (const e of Object.values(db.entries)) {
       if (!e.missing && e.meta && e.meta.error) { e.meta = null; pushPatch(e); }
     }
@@ -519,7 +546,12 @@ app.whenReady().then(async () => {
   // varredura automática ao abrir
   win.webContents.once('did-finish-load', () => {
     if (process.env.CAT_TEST) return;
-    if (db.roots.length) setTimeout(() => scanRoots(db.roots).catch(console.error), 800);
+    setTimeout(async () => {
+        try {
+          if (db.roots.length) await scanRoots(db.roots, 'stl');
+          if (db.rootsLaser.length) await scanRoots(db.rootsLaser, 'laser');
+        } catch (e) { console.error(e); }
+      }, 800);
   });
   win.webContents.on('before-input-event', (_e, input) => {
     if (input.type === 'keyDown' && input.key === 'F12') win.webContents.toggleDevTools();
@@ -534,22 +566,50 @@ async function runTest() {
   fs.mkdirSync(shots, { recursive: true });
   await new Promise((r) => win.webContents.once('did-finish-load', r));
   if (!db.roots.includes(dir)) db.roots.push(dir);
-  await scanRoots(db.roots);
+  await scanRoots(db.roots, 'stl');
+  const ldir = process.env.CAT_TEST_LASER;
+  if (ldir) { if (!db.rootsLaser.includes(ldir)) db.rootsLaser.push(ldir); await scanRoots(db.rootsLaser, 'laser'); }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const snap = async (name) => {
     const img = await win.webContents.capturePage();
     fs.writeFileSync(path.join(shots, name + '.png'), img.toPNG());
   };
-  for (let i = 0; i < 60 && pendingCount() > 0; i++) await sleep(500);
+  let rep0 = {};
+  const js = (c) => win.webContents.executeJavaScript(c);
+  for (let i = 0; i < 80 && pendingCount() > 0; i++) await sleep(500);
   await sleep(1500);
+  await js(`window.__test.setMode('stl')`);
+  await sleep(500);
   await snap('1-grid');
-  await win.webContents.executeJavaScript(`window.__test && window.__test.openFirst()`);
+  await js(`window.__test.hoverFirst()`);
+  await sleep(1800);
+  await snap('1b-hover');
+  rep0 = JSON.parse(await js(`window.__test.report()`));
+  await js(`window.__test.openFirst()`);
   await sleep(2500);
   await snap('2-viewer');
-  await win.webContents.executeJavaScript(`window.__test && window.__test.closeViewer()`);
-  await sleep(300);
-  const log = await win.webContents.executeJavaScript(`window.__test ? window.__test.report() : 'sem __test'`);
-  fs.writeFileSync(path.join(shots, 'report.txt'), String(log));
+  await js(`document.querySelector('[data-view=top]').click()`);
+  await sleep(600);
+  await snap('2b-top');
+  await js(`window.__test.closeViewer()`);
+  let rep = { hoverSpin: rep0.spinCanvas };
+  rep.stl = JSON.parse(await js(`window.__test.report()`));
+  if (process.env.CAT_TEST_LASER) {
+    await js(`window.__test.setMode('laser')`);
+    await sleep(800);
+    await snap('3-laser-grid');
+    rep.laser = JSON.parse(await js(`window.__test.report()`));
+    const names = rep.laser.items.map((x) => x.n);
+    for (const want of ['forma.dxf', 'logo.svg', 'poster.pdf', 'corte.gcode', 'peca.cdr']) {
+      const i = names.indexOf(want);
+      if (i < 0) continue;
+      await js(`window.__test.openIndex(${i})`);
+      await sleep(2200);
+      await snap('4-laser-' + want.replace(/\W/g, '_'));
+      await js(`window.__test.closeViewer()`);
+    }
+  }
+  fs.writeFileSync(path.join(shots, 'report.txt'), JSON.stringify(rep, null, 1));
   saveNow();
   app.quit();
 }

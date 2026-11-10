@@ -1,11 +1,13 @@
 import { parseStl, makeMaterial, addLights, THREE } from './stl.js';
 import { OrbitControls } from '../vendor/OrbitControls.js';
+import { loadScene, fitView, renderScene, NoPreview, LASER_LABEL } from './laser.js';
 
 const $ = (s) => document.querySelector(s);
 const api = window.api;
 
 const state = {
-  roots: [], entries: new Map(), thumbsDir: '',
+  mode: (() => { try { return localStorage.getItem('mode') || 'stl'; } catch (_) { return 'stl'; } })(),
+  roots: { stl: [], laser: [] }, entries: new Map(), thumbsDir: '',
   view: 'all', folder: null, tag: null, q: '', sort: 'name',
   selected: new Set(), lastClicked: null, shown: 0, list: [],
   dupFilter: null,
@@ -20,8 +22,10 @@ const strip = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const thumbUrl = (e) => 'file:///' + (state.thumbsDir + '/' + e.id + '.jpg').replace(/\\/g, '/').replace(/^\/+/, '') + '?t=' + (e.thumbAt || 0);
 const normP = (p) => (sep === '\\' ? p.toLowerCase() : p);
-const maxDim = (e) => (e.meta && !e.meta.error ? Math.max(e.meta.dx, e.meta.dy, e.meta.dz) : 0);
-const hasThumb = (e) => e.meta && !e.meta.error;
+const maxDim = (e) => (e.meta && !e.meta.error ? Math.max(e.meta.dx || 0, e.meta.dy || 0, e.meta.dz || 0) : 0);
+const hasThumb = (e) => !!(e.meta && !e.meta.error && e.meta.thumb !== false);
+const inMode = (e) => e.kind === state.mode;
+const modeEntries = () => [...state.entries.values()].filter(inMode);
 
 function setStatus(text, frac) {
   $('#statusText').textContent = text;
@@ -120,7 +124,7 @@ function computeList() {
   const q = strip(state.q.trim());
   const words = q ? q.split(/\s+/) : [];
   const fr = state.folder ? normP(state.folder) : null;
-  let arr = entriesArr().filter((e) => {
+  let arr = modeEntries().filter((e) => {
     if (state.dupFilter) return state.dupFilter.has(e.id);
     if (state.view === 'missing') { if (!e.missing) return false; }
     else if (e.missing) return false;
@@ -159,8 +163,13 @@ function refreshAll(keepScroll) {
   $('#grid').innerHTML = '';
   appendPage();
   if (keepScroll) { $('#content').scrollTop = sc; while (state.shown < state.list.length && $('#content').scrollHeight < sc + $('#content').clientHeight + 200) appendPage(); }
-  const none = state.entries.size === 0;
+  const none = modeEntries().length === 0;
   $('#empty').hidden = !none;
+  const hasRoots = state.roots[state.mode].length > 0;
+  $('#emptyTitle').textContent = hasRoots ? 'Nenhum arquivo encontrado nas pastas adicionadas' : (state.mode === 'laser' ? 'Vamos organizar seus arquivos de laser/CNC' : 'Vamos organizar essa pasta gigante');
+  $('#emptyText').innerHTML = state.mode === 'laser'
+    ? 'Clique em <b>＋ Adicionar pasta</b> e escolha onde estão seus arquivos de corte/gravação.<br>Lê SVG, DXF, AI, PDF, CDR (Corel), EPS, PLT, LightBurn (.lbrn), G-code e DWG.'
+    : 'Clique em <b>＋ Adicionar pasta</b> e escolha a pasta onde estão seus arquivos STL.<br>O programa varre tudo (inclusive subpastas), gera miniaturas e deixa você buscar, marcar e mover.';
   $('#crumb').textContent = crumbText();
   renderSelbar();
 }
@@ -177,10 +186,15 @@ function crumbText() {
 
 function cardHtml(e) {
   const m = e.meta && !e.meta.error ? e.meta : null;
-  const dims = m ? `${Math.round(m.dx)}×${Math.round(m.dy)}×${Math.round(m.dz)} mm` : (e.meta && e.meta.error ? 'não foi possível abrir' : 'processando…');
-  const img = hasThumb(e) ? `<img loading="lazy" src="${thumbUrl(e)}">` : (e.meta ? '⚠' : '…');
+  const lbl = LASER_LABEL[e.ext] || (e.ext || '').toUpperCase();
+  let dims;
+  if (m && e.kind === 'laser') dims = m.dx != null ? `${Math.round(m.dx * 10) / 10}×${Math.round(m.dy * 10) / 10} mm` : lbl;
+  else if (m) dims = `${Math.round(m.dx)}×${Math.round(m.dy)}×${Math.round(m.dz)} mm`;
+  else dims = e.meta && e.meta.error ? 'não foi possível abrir' : 'processando…';
+  const img = hasThumb(e) ? `<img loading="lazy" src="${thumbUrl(e)}">` : (e.meta && e.meta.error ? '⚠' : (e.meta ? `<b class="bigext">${esc(lbl)}</b>` : '…'));
+  const badge = e.kind === 'laser' ? `<span class="badge">${esc(lbl)}</span>` : '';
   return `<div class="th">${img}</div>
-    <div class="nm" title="${esc(e.name)}">${esc(e.name)}</div>
+    ${badge}<div class="nm" title="${esc(e.name)}">${esc(e.name)}</div>
     <div class="mt">${dims} · ${fmtSize(e.size)}</div>
     ${e.tags.length ? `<div class="tgs">${e.tags.map((t) => '#' + esc(t)).join(' ')}</div>` : ''}
     <span class="star ${e.fav ? '' : 'off'}" data-star="1">${e.fav ? '★' : '☆'}</span>`;
@@ -210,7 +224,7 @@ new IntersectionObserver((en) => {
 // árvore de pastas
 function buildTree() {
   const rootsMap = new Map();
-  for (const e of state.entries.values()) {
+  for (const e of modeEntries()) {
     if (e.missing) continue;
     const root = e.root || e.dir;
     let rn = rootsMap.get(root);
@@ -262,12 +276,12 @@ function renderNode(n, depth) {
 
 function allTags() {
   const m = new Map();
-  for (const e of state.entries.values()) if (!e.missing) for (const t of e.tags) m.set(t, (m.get(t) || 0) + 1);
+  for (const e of modeEntries()) if (!e.missing) for (const t of e.tags) m.set(t, (m.get(t) || 0) + 1);
   return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt'));
 }
 
 function renderSidebar() {
-  const arr = entriesArr();
+  const arr = modeEntries();
   const live = arr.filter((e) => !e.missing);
   $('#cntAll').textContent = fmtNum(live.length);
   $('#cntFav').textContent = fmtNum(live.filter((e) => e.fav).length);
@@ -384,10 +398,10 @@ $('#selbar').addEventListener('click', async (ev) => {
 
 // ------------------------------------------------------------ barra superior
 $('#btnAdd').onclick = $('#btnAdd2').onclick = async () => {
-  const p = await api.addRoot();
-  if (p) { setStatus('Procurando arquivos…', null); api.scan([p]); }
+  const p = await api.addRoot(state.mode);
+  if (p) { setStatus('Procurando arquivos…', null); api.scan(state.mode, [p]); }
 };
-$('#btnRescan').onclick = () => { setStatus('Procurando arquivos…', null); api.scan(); };
+$('#btnRescan').onclick = () => { setStatus('Procurando arquivos…', null); api.scan(state.mode); };
 $('#search').addEventListener('input', debounce((e) => { state.q = e.target.value; state.selected.clear(); refreshAll(); }, 160));
 $('#sort').onchange = (e) => { state.sort = e.target.value; refreshAll(); };
 $('#zoom').oninput = (e) => document.documentElement.style.setProperty('--card', e.target.value + 'px');
@@ -397,17 +411,18 @@ document.addEventListener('click', () => { $('#menuMore').hidden = true; });
 $('#menuMore').addEventListener('click', async (ev) => {
   const m = ev.target.dataset.m;
   if (!m) return;
-  if (m === 'csv') { const p = await api.exportCsv(); if (p) setStatus('Catálogo exportado: ' + p, 1); }
+  if (m === 'csv') { const p = await api.exportCsv(state.mode); if (p) setStatus('Catálogo exportado: ' + p, 1); }
   if (m === 'regen') { api.thumbRegen(); setStatus('Tentando de novo…', 0); }
-  if (m === 'clearMissing') { const n = await api.clearMissing(); setStatus(n + ' item(ns) ausente(s) removido(s) do catálogo', 1); }
+  if (m === 'clearMissing') { const n = await api.clearMissing(state.mode); setStatus(n + ' item(ns) ausente(s) removido(s) do catálogo', 1); }
   if (m === 'removeRoot') {
-    if (!state.roots.length) return;
+    const rl = state.roots[state.mode];
+    if (!rl.length) return;
     const wrap = document.createElement('div');
     wrap.innerHTML = '<p class="muted">Isso tira a pasta do catálogo (tags e notas dos arquivos dela serão perdidas). Os arquivos no disco NÃO são apagados.</p>';
     const sel = document.createElement('select'); sel.style.width = '100%';
-    sel.innerHTML = state.roots.map((r) => `<option>${esc(r)}</option>`).join('');
+    sel.innerHTML = rl.map((r) => `<option>${esc(r)}</option>`).join('');
     wrap.appendChild(sel);
-    if (await dialog({ title: 'Remover pasta do catálogo', body: wrap, ok: 'Remover' })) { await api.removeRoot(sel.value); state.folder = null; }
+    if (await dialog({ title: 'Remover pasta do catálogo', body: wrap, ok: 'Remover' })) { await api.removeRoot(state.mode, sel.value); state.folder = null; }
   }
 });
 
@@ -416,7 +431,7 @@ let dupGroups = [];
 $('#btnDup').onclick = async () => {
   setStatus('Procurando duplicados…', 0);
   $('#btnDup').disabled = true;
-  dupGroups = await api.findDuplicates();
+  dupGroups = await api.findDuplicates(state.mode);
   $('#btnDup').disabled = false;
   setStatus(dupGroups.length ? `${dupGroups.length} grupo(s) de duplicados` : 'Nenhum duplicado encontrado', 1);
   if (!dupGroups.length) { await dialog({ title: 'Sem duplicados', body: '<p>Não encontrei arquivos idênticos (mesmo conteúdo) no catálogo. 🎉</p>', cancel: null }); return; }
@@ -462,7 +477,16 @@ $('#dupTrash').onclick = async () => {
 
 // ------------------------------------------------------------ visualizador
 let viewerOpen = false, vIndex = 0, vEntry = null;
-let vr = null; // {renderer, scene, camera, controls, mesh, grid, axes, ro, raf}
+let vr = null;  // visualizador 3D
+let lv = null;  // visualizador 2D (laser)
+let idleTimer = 0;
+
+const VIEW_DIRS = {
+  iso: [1, -1.25, 0.85],
+  front: [0, -1, 0.0001],
+  side: [1, 0, 0.0001],
+  top: [0.0001, -0.0001, 1],
+};
 
 function initViewer() {
   if (vr) return;
@@ -477,6 +501,14 @@ function initViewer() {
   addLights(scene, camera);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
+  controls.autoRotate = $('#vSpin').classList.contains('on');
+  controls.autoRotateSpeed = 3;
+  controls.addEventListener('start', () => { clearTimeout(idleTimer); controls.autoRotate = false; });
+  controls.addEventListener('end', () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => { if (vr && $('#vSpin').classList.contains('on')) vr.controls.autoRotate = true; }, 2500);
+  });
+  renderer.domElement.addEventListener('dblclick', () => frame());
   const material = makeMaterial();
   const ro = new ResizeObserver(() => {
     const w = container.clientWidth, h = container.clientHeight;
@@ -485,7 +517,7 @@ function initViewer() {
     camera.aspect = w / h; camera.updateProjectionMatrix();
   });
   ro.observe(container);
-  vr = { renderer, scene, camera, controls, material, mesh: null, grid: null, axes: null, ro, raf: 0, size: 100 };
+  vr = { renderer, scene, camera, controls, material, mesh: null, grid: null, axes: null, ro, raf: 0 };
   const loop = () => { vr.raf = requestAnimationFrame(loop); vr.controls.update(); vr.renderer.render(vr.scene, vr.camera); };
   loop();
 }
@@ -496,12 +528,12 @@ function niceStep(x) {
   return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p;
 }
 
-function frame() {
+function frame(dirName = 'iso') {
   if (!vr || !vr.mesh) return;
   const geo = vr.mesh.geometry;
   const r = geo.boundingSphere.radius || 1, c = geo.boundingSphere.center;
   const dist = (r / Math.sin((vr.camera.fov * Math.PI) / 360)) * 1.1;
-  const dir = new THREE.Vector3(1, -1.25, 0.85).normalize();
+  const dir = new THREE.Vector3(...VIEW_DIRS[dirName]).normalize();
   vr.camera.position.copy(c).addScaledVector(dir, dist);
   vr.camera.near = dist / 200; vr.camera.far = dist * 50;
   vr.camera.updateProjectionMatrix();
@@ -509,7 +541,34 @@ function frame() {
   vr.controls.update();
 }
 
+function setMsg(text) {
+  let m = $('#vMsg');
+  if (!text) { if (m) m.remove(); return; }
+  if (!m) { m = document.createElement('div'); m.id = 'vMsg'; $('#vStage').appendChild(m); }
+  m.textContent = text;
+}
+
+function disposeStlViewer() {
+  if (!vr) return;
+  cancelAnimationFrame(vr.raf);
+  clearTimeout(idleTimer);
+  vr.ro.disconnect();
+  if (vr.mesh) { vr.scene.remove(vr.mesh); vr.mesh.geometry.dispose(); }
+  vr.renderer.dispose(); vr.renderer.forceContextLoss();
+  vr.renderer.domElement.remove();
+  vr = null;
+}
+function disposeLaserViewer() {
+  if (!lv) return;
+  lv.ro.disconnect();
+  lv.canvas.remove();
+  $('#vCanvas').classList.remove('laser');
+  lv = null;
+}
+
 async function loadInViewer(e) {
+  disposeLaserViewer();
+  setMsg(null);
   initViewer();
   $('#vDims').textContent = 'Carregando…';
   if (vr.mesh) { vr.scene.remove(vr.mesh); vr.mesh.geometry.dispose(); vr.mesh = null; }
@@ -517,7 +576,7 @@ async function loadInViewer(e) {
   if (vr.axes) { vr.scene.remove(vr.axes); vr.axes = null; }
   try {
     const u8 = await api.readFile(e.path);
-    if (vEntry !== e) return;
+    if (vEntry !== e || !vr) return;
     const { geo, meta } = parseStl(u8);
     const mesh = new THREE.Mesh(geo, vr.material);
     vr.scene.add(mesh); vr.mesh = mesh;
@@ -542,6 +601,89 @@ async function loadInViewer(e) {
   }
 }
 
+// ---- visualizador 2D (laser/CNC)
+function initLaserViewer() {
+  if (lv) return;
+  const container = $('#vCanvas');
+  container.classList.add('laser');
+  const canvas = document.createElement('canvas');
+  canvas.style.width = '100%'; canvas.style.height = '100%'; canvas.style.display = 'block';
+  container.appendChild(canvas);
+  lv = { canvas, ctx: canvas.getContext('2d'), scene: null, view: null, W: 0, H: 0, dark: false, raf: 0, drag: null };
+  const draw = () => {
+    lv.raf = 0;
+    if (!lv.scene || !lv.view) return;
+    const dpr = window.devicePixelRatio || 1;
+    lv.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    renderScene(lv.ctx, lv.scene, lv.W, lv.H, lv.view, lv.dark ? { bg: '#14171e', line: '#8fb4ff', lw: 1.2 } : { bg: '#f1f3f7', lw: 1.3 });
+    const { w } = lv.scene.type === 'image' ? { w: lv.scene.w } : { w: lv.scene.bounds.maxx - lv.scene.bounds.minx };
+    const fit = fitView(lv.scene, lv.W, lv.H);
+    $('#vHint').textContent = `Zoom ${Math.round((lv.view.scale / fit.scale) * 100)}% · arraste para mover · roda para zoom · duplo clique para ajustar`;
+  };
+  lv.draw = () => { if (!lv.raf) lv.raf = requestAnimationFrame(draw); };
+  lv.fit = () => { if (lv.scene) { lv.view = fitView(lv.scene, lv.W, lv.H, 24); lv.draw(); } };
+  lv.ro = new ResizeObserver(() => {
+    const w = container.clientWidth, h = container.clientHeight;
+    if (!w || !h) return;
+    const dpr = window.devicePixelRatio || 1;
+    lv.W = w; lv.H = h;
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    if (lv.scene && !lv.view) lv.fit(); else lv.draw();
+  });
+  lv.ro.observe(container);
+  canvas.addEventListener('wheel', (ev) => {
+    if (!lv.scene || !lv.view) return;
+    ev.preventDefault();
+    const r = canvas.getBoundingClientRect();
+    const px = ev.clientX - r.left, py = ev.clientY - r.top;
+    const flip = lv.scene.type === 'paths' ? -1 : 1;
+    const v = lv.view;
+    const sx = v.cx + (px - lv.W / 2) / v.scale, sy = v.cy + flip * (py - lv.H / 2) / v.scale;
+    const k = Math.exp(-ev.deltaY * 0.0015);
+    v.scale = Math.min(Math.max(v.scale * k, 1e-6), 1e7);
+    v.cx = sx - (px - lv.W / 2) / v.scale;
+    v.cy = sy - flip * (py - lv.H / 2) / v.scale;
+    lv.draw();
+  }, { passive: false });
+  canvas.addEventListener('pointerdown', (ev) => { canvas.setPointerCapture(ev.pointerId); lv.drag = { x: ev.clientX, y: ev.clientY }; });
+  canvas.addEventListener('pointermove', (ev) => {
+    if (!lv.drag || !lv.view) return;
+    const dx = ev.clientX - lv.drag.x, dy = ev.clientY - lv.drag.y;
+    lv.drag = { x: ev.clientX, y: ev.clientY };
+    lv.view.cx -= dx / lv.view.scale;
+    lv.view.cy += (lv.scene.type === 'paths' ? 1 : -1) * dy / lv.view.scale;
+    lv.draw();
+  });
+  canvas.addEventListener('pointerup', () => { lv.drag = null; });
+  canvas.addEventListener('dblclick', () => lv.fit());
+}
+
+async function loadInLaserViewer(e) {
+  disposeStlViewer();
+  setMsg(null);
+  initLaserViewer();
+  lv.scene = null; lv.view = null;
+  $('#vDims').textContent = 'Carregando…';
+  $('#vHint').textContent = '';
+  lv.ctx.setTransform(1, 0, 0, 1, 0, 0); lv.ctx.clearRect(0, 0, lv.canvas.width, lv.canvas.height);
+  try {
+    const scene = await loadScene(e, { maxSide: 2600 });
+    if (vEntry !== e || !lv) return;
+    lv.scene = scene;
+    lv.fit();
+    const d = scene.wMM != null ? `<b>${(+scene.wMM).toFixed(1)} × ${(+scene.hMM).toFixed(1)} mm</b>` : '<b>tamanho desconhecido</b>';
+    $('#vDims').innerHTML = d + (scene.pages > 1 ? ` &nbsp;·&nbsp; página 1 de ${scene.pages}` : '') + (scene.count ? ` &nbsp;·&nbsp; ${fmtNum(scene.count)} trajetos` : '');
+    if (scene.wMM != null && (!e.meta || e.meta.dx == null)) { e.meta = { ...(e.meta || {}), laser: true, ext: e.ext, dx: scene.wMM, dy: scene.hMM }; }
+    updateViewerInfo();
+  } catch (err) {
+    $('#vDims').textContent = '';
+    const lbl = LASER_LABEL[e.ext] || e.ext;
+    setMsg(err instanceof NoPreview
+      ? `Este formato (${lbl}) não tem pré-visualização aqui.\nUse “Abrir no programa” para ver no CorelDRAW, LightBurn, AutoCAD…`
+      : 'Não foi possível abrir este arquivo: ' + (err.message || err));
+  }
+}
+
 function updateViewerInfo() {
   const e = vEntry && state.entries.get(vEntry.id);
   if (!e) return;
@@ -549,14 +691,20 @@ function updateViewerInfo() {
   $('#vName').textContent = e.name;
   $('#vPath').textContent = e.dir;
   const m = e.meta && !e.meta.error ? e.meta : null;
-  const rows = [
+  const laser = e.kind === 'laser';
+  const rows = laser ? [
+    ['Tipo', LASER_LABEL[e.ext] || (e.ext || '').toUpperCase()],
+    ['Tamanho do arquivo', fmtSize(e.size)],
+    m && m.dx != null && ['Dimensões (mm)', `${(+m.dx).toFixed(1)} × ${(+m.dy).toFixed(1)}`],
+    ['Modificado', new Date(e.mtime).toLocaleDateString('pt-BR')],
+  ] : [
     ['Tamanho do arquivo', fmtSize(e.size)],
     m && ['Dimensões (mm)', `${m.dx} × ${m.dy} × ${m.dz}`],
     m && ['Triângulos', fmtNum(m.tris)],
     m && ['Volume', (m.vol / 1000).toFixed(2) + ' cm³'],
     ['Modificado', new Date(e.mtime).toLocaleDateString('pt-BR')],
-  ].filter(Boolean);
-  $('#vTable').innerHTML = rows.map(([a, b]) => `<tr><td class="muted">${a}</td><td>${b}</td></tr>`).join('');
+  ];
+  $('#vTable').innerHTML = rows.filter(Boolean).map(([a, b]) => `<tr><td class="muted">${a}</td><td>${b}</td></tr>`).join('');
   $('#vFav').textContent = e.fav ? '★ Favorito' : '☆ Favorito';
   $('#vTags').innerHTML = e.tags.map((t) => `<span class="tag-pill">#${esc(t)} <b data-rm="${esc(t)}">✕</b></span>`).join('') || '<span class="muted">sem tags</span>';
   const note = $('#vNote');
@@ -568,40 +716,48 @@ function openViewer(i) {
   if (!e) return;
   vIndex = i; vEntry = e; viewerOpen = true;
   $('#viewer').hidden = false;
+  const laser = e.kind === 'laser';
+  $('#vTools').hidden = laser;
+  $('#lTools').hidden = !laser;
+  $('#vHint').textContent = laser ? '' : 'Arraste: girar · Roda: zoom · Botão direito: mover · Duplo clique: recentrar';
   updateViewerInfo();
-  loadInViewer(e);
+  if (laser) loadInLaserViewer(e); else loadInViewer(e);
 }
 function closeViewer() {
   viewerOpen = false; vEntry = null;
   $('#viewer').hidden = true;
-  if (vr) {
-    cancelAnimationFrame(vr.raf);
-    vr.ro.disconnect();
-    if (vr.mesh) { vr.scene.remove(vr.mesh); vr.mesh.geometry.dispose(); }
-    vr.renderer.dispose(); vr.renderer.forceContextLoss();
-    vr.renderer.domElement.remove();
-    vr = null;
-  }
+  disposeStlViewer();
+  disposeLaserViewer();
+  setMsg(null);
 }
 function stepViewer(d) {
   let i = vIndex + d;
   if (i < 0 || i >= state.list.length) return;
-  openViewer(i);
   if (i >= state.shown - 5) appendPage();
+  openViewer(i);
 }
 
 $('#vClose').onclick = closeViewer;
 $('#vPrev').onclick = () => stepViewer(-1);
 $('#vNext').onclick = () => stepViewer(1);
-$('#vReset').onclick = frame;
+$('#vReset').onclick = () => frame();
+$('#lFit').onclick = () => lv && lv.fit();
+$('#lBg').onclick = (e) => { if (!lv) return; lv.dark = !lv.dark; e.target.textContent = lv.dark ? 'Fundo claro' : 'Fundo escuro'; lv.draw(); };
+$('#vSpin').onclick = (e) => {
+  e.target.classList.toggle('on');
+  if (vr) vr.controls.autoRotate = e.target.classList.contains('on');
+};
+document.querySelectorAll('#vTools [data-view]').forEach((b) => { b.onclick = () => frame(b.dataset.view); });
 $('#vWire').onclick = (e) => { e.target.classList.toggle('on'); if (vr) vr.material.wireframe = e.target.classList.contains('on'); };
 $('#vGrid').onclick = (e) => { e.target.classList.toggle('on'); if (vr && vr.grid) vr.grid.visible = e.target.classList.contains('on'); };
 $('#vAxes').onclick = (e) => { e.target.classList.toggle('on'); if (vr && vr.axes) vr.axes.visible = e.target.classList.contains('on'); };
 $('#vFav').onclick = () => vEntry && api.update(vEntry.id, { fav: !vEntry.fav });
 $('#vShow').onclick = () => vEntry && api.showInFolder(vEntry.path);
+$('#vOpen').onclick = () => vEntry && api.openFile(vEntry.path);
 $('#vRename').onclick = async () => {
   if (!vEntry) return;
-  const base = vEntry.name.replace(/\.stl$/i, '');
+  const dot = vEntry.name.lastIndexOf('.');
+  const base = dot > 0 ? vEntry.name.slice(0, dot) : vEntry.name;
   const n = await promptText('Renomear arquivo', 'novo nome', base);
   if (!n || n === base) return;
   const r = await api.rename(vEntry.id, n);
@@ -627,6 +783,9 @@ document.addEventListener('keydown', (ev) => {
     else if (!typing && ev.key === 'ArrowLeft') stepViewer(-1);
     else if (!typing && ev.key === 'ArrowRight') stepViewer(1);
     else if (!typing && ev.key.toLowerCase() === 'f') $('#vFav').click();
+    else if (!typing && vr && ev.key === ' ') { ev.preventDefault(); $('#vSpin').click(); }
+    else if (!typing && vr && ['1', '2', '3', '4'].includes(ev.key)) frame(['iso', 'front', 'side', 'top'][+ev.key - 1]);
+    else if (!typing && vr && ev.key.toLowerCase() === 'w') $('#vWire').click();
     return;
   }
   if (ev.key === 'Escape' && state.selected.size) { state.selected.clear(); renderSelbar(); }
@@ -634,11 +793,107 @@ document.addEventListener('keydown', (ev) => {
   if (ev.ctrlKey && ev.key.toLowerCase() === 'f') { ev.preventDefault(); $('#search').focus(); }
 });
 
+// ------------------------------------------------------------ giro ao passar o mouse (3D)
+const hover = { timer: 0, card: null, r: null, cache: new Map(), raf: 0, token: 0 };
+
+function stopHover() {
+  clearTimeout(hover.timer);
+  hover.token++;
+  cancelAnimationFrame(hover.raf);
+  if (hover.r) hover.r.renderer.domElement.remove();
+  hover.card = null;
+}
+
+async function startHover(card) {
+  const e = state.entries.get(card.dataset.id);
+  if (!e || e.kind !== 'stl' || e.missing || e.size > 80 * 1048576 || !hasThumb(e)) return;
+  const th = card.querySelector('.th');
+  if (!th) return;
+  const token = ++hover.token;
+  hover.card = card;
+  let geo = hover.cache.get(e.id);
+  if (!geo) {
+    try {
+      const u8 = await api.readFile(e.path);
+      if (token !== hover.token) return;
+      geo = parseStl(u8).geo;
+    } catch (_) { return; }
+    hover.cache.set(e.id, geo);
+    if (hover.cache.size > 6) { const k = hover.cache.keys().next().value; hover.cache.get(k).dispose(); hover.cache.delete(k); }
+  }
+  if (token !== hover.token) return;
+  if (!hover.r) {
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setClearColor(0x1d212b, 1);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 1e6);
+    camera.up.set(0, 0, 1);
+    addLights(scene, camera);
+    hover.r = { renderer, scene, camera, material: makeMaterial(), mesh: null };
+  }
+  const R = hover.r;
+  if (R.mesh) R.scene.remove(R.mesh);
+  R.mesh = new THREE.Mesh(geo, R.material);
+  R.scene.add(R.mesh);
+  const sz = Math.max(120, Math.round(th.clientWidth));
+  R.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  R.renderer.setSize(sz, sz, false);
+  R.renderer.domElement.className = 'spin';
+  th.appendChild(R.renderer.domElement);
+  const rad = geo.boundingSphere.radius || 1, c = geo.boundingSphere.center;
+  const dist = rad / Math.sin((R.camera.fov * Math.PI) / 360) * 1.05;
+  const t0 = performance.now();
+  const loop = () => {
+    if (token !== hover.token) return;
+    const a = -0.9 + ((performance.now() - t0) / 1000) * 1.1;
+    const el = 0.62;
+    R.camera.position.set(c.x + dist * Math.cos(el) * Math.sin(a), c.y - dist * Math.cos(el) * Math.cos(a), c.z + dist * Math.sin(el));
+    R.camera.near = dist / 100; R.camera.far = dist * 10;
+    R.camera.updateProjectionMatrix();
+    R.camera.lookAt(c);
+    R.renderer.render(R.scene, R.camera);
+    hover.raf = requestAnimationFrame(loop);
+  };
+  loop();
+}
+
+$('#grid').addEventListener('mouseover', (ev) => {
+  const card = ev.target.closest('.card');
+  if (!card || card === hover.card || state.mode !== 'stl') return;
+  stopHover();
+  hover.card = card;
+  hover.timer = setTimeout(() => startHover(card), 450);
+});
+$('#grid').addEventListener('mouseleave', stopHover);
+$('#grid').addEventListener('mouseout', (ev) => {
+  const card = ev.target.closest('.card');
+  if (card && !card.contains(ev.relatedTarget)) stopHover();
+});
+$('#content').addEventListener('scroll', stopHover, { passive: true });
+
+// ------------------------------------------------------------ abas
+function setMode(m, silent) {
+  if (viewerOpen) closeViewer();
+  stopHover();
+  state.mode = m;
+  try { localStorage.setItem('mode', m); } catch (_) {}
+  state.view = 'all'; state.folder = null; state.tag = null; state.dupFilter = null; state.q = ''; state.selected.clear();
+  $('#search').value = '';
+  document.querySelectorAll('#tabs .tab').forEach((t) => t.classList.toggle('on', t.dataset.mode === m));
+  document.title = m === 'laser' ? 'Catálogo — Laser / CNC' : 'Catálogo — 3D (STL)';
+  if (!silent) refreshAll();
+}
+document.querySelectorAll('#tabs .tab').forEach((t) => { t.onclick = () => setMode(t.dataset.mode); });
+
 // gancho para teste automatizado
 window.__test = {
+  setMode,
   openFirst: () => openViewer(0),
+  openIndex: (i) => openViewer(i),
   closeViewer,
-  report: () => JSON.stringify({ entries: state.entries.size, list: state.list.length, withThumb: [...state.entries.values()].filter(hasThumb).length, errors: [...state.entries.values()].filter((e) => e.meta && e.meta.error).length, sample: state.list.slice(0, 3).map((e) => ({ n: e.name, m: e.meta })) }),
+  hoverFirst: () => { const c = document.querySelector('.card'); if (c) { stopHover(); startHover(c); } },
+  report: () => JSON.stringify({ spinCanvas: document.querySelectorAll('canvas.spin').length, mode: state.mode, entries: state.entries.size, list: state.list.length, withThumb: modeEntries().filter(hasThumb).length, errors: modeEntries().filter((e) => e.meta && e.meta.error).length, items: state.list.map((e) => ({ n: e.name, m: e.meta })) }),
 };
 
+setMode(state.mode, true);
 load();

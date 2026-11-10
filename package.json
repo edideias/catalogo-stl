@@ -42,10 +42,14 @@
       "artifactName": "Catalogo-STL-portatil.${ext}"
     }
   },
-  "dependencies": {},
+  "dependencies": {
+    "adm-zip": "^0.6.1",
+    "dxf-parser": "^1.1.2"
+  },
   "devDependencies": {
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
-    "three": "^0.170.0"
+    "three": "^0.170.0",
+    "pdfjs-dist": "^4.10.38"
   }
 }
