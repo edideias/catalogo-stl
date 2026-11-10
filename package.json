@@ -1,0 +1,51 @@
+{
+  "name": "catalogo-stl",
+  "version": "1.0.0",
+  "description": "Catálogo e visualizador de arquivos STL",
+  "main": "app/main.js",
+  "author": "Ed",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64 --publish never"
+  },
+  "build": {
+    "appId": "com.edideias.catalogostl",
+    "productName": "Catalogo STL",
+    "files": [
+      "app/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "artifactName": "Catalogo-STL-instalador.${ext}"
+    },
+    "portable": {
+      "artifactName": "Catalogo-STL-portatil.${ext}"
+    }
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "three": "^0.170.0"
+  }
+}

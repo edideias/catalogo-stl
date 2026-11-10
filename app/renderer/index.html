@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Catálogo STL</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="top">
+  <button id="btnAdd" class="primary">＋ Adicionar pasta</button>
+  <button id="btnRescan" title="Procurar arquivos novos nas pastas">⟳ Atualizar</button>
+  <input id="search" type="search" placeholder="Buscar por nome, pasta, tag ou nota…" autocomplete="off">
+  <select id="sort" title="Ordenar">
+    <option value="name">Nome A–Z</option>
+    <option value="nameDesc">Nome Z–A</option>
+    <option value="new">Mais recentes</option>
+    <option value="old">Mais antigos</option>
+    <option value="big">Maiores (arquivo)</option>
+    <option value="small">Menores (arquivo)</option>
+    <option value="dim">Maior dimensão</option>
+    <option value="tris">Mais triângulos</option>
+  </select>
+  <label class="zoom" title="Tamanho das miniaturas">▫<input id="zoom" type="range" min="110" max="320" value="190">▣</label>
+  <button id="btnDup">Duplicados</button>
+  <button id="btnMore" title="Mais opções">⋯</button>
+</header>
+
+<div id="main">
+  <aside id="side">
+    <div class="sec">
+      <div class="item" data-view="all">📁 Todos <span class="cnt" id="cntAll"></span></div>
+      <div class="item" data-view="fav">★ Favoritos <span class="cnt" id="cntFav"></span></div>
+      <div class="item" data-view="untagged">🏷 Sem tag <span class="cnt" id="cntUntagged"></span></div>
+      <div class="item" data-view="nometa" id="itemErr" hidden>⚠ Com erro <span class="cnt" id="cntErr"></span></div>
+      <div class="item" data-view="missing" id="itemMissing" hidden>❔ Ausentes <span class="cnt" id="cntMissing"></span></div>
+    </div>
+    <div class="sec">
+      <h4>Pastas</h4>
+      <div id="tree"></div>
+    </div>
+    <div class="sec">
+      <h4>Tags</h4>
+      <div id="tags"></div>
+    </div>
+  </aside>
+
+  <section id="content">
+    <div id="empty" hidden>
+      <h2>Vamos organizar essa pasta gigante</h2>
+      <p>Clique em <b>＋ Adicionar pasta</b> e escolha a pasta onde estão seus arquivos STL.<br>O programa varre tudo (inclusive subpastas), gera miniaturas e deixa você buscar, marcar e mover.</p>
+      <button id="btnAdd2" class="primary big">＋ Adicionar pasta</button>
+    </div>
+    <div id="crumb"></div>
+    <div id="grid"></div>
+    <div id="sentinel"></div>
+  </section>
+</div>
+
+<div id="selbar" hidden>
+  <span id="selCount"></span>
+  <button data-act="tag">＋ Tag</button>
+  <button data-act="untag">− Tag</button>
+  <button data-act="fav">★ Favoritar</button>
+  <button data-act="move">Mover para…</button>
+  <button data-act="trash" class="danger">Lixeira</button>
+  <button data-act="clear">Limpar seleção</button>
+</div>
+
+<footer id="status"><span id="statusText">Pronto</span><div id="bar"><i id="barFill"></i></div></footer>
+
+<!-- Visualizador -->
+<div id="viewer" hidden>
+  <div id="vStage">
+    <div id="vCanvas"></div>
+    <div id="vDims"></div>
+    <div id="vTools">
+      <button id="vWire">Malha</button>
+      <button id="vGrid" class="on">Grade</button>
+      <button id="vAxes">Eixos</button>
+      <button id="vReset">Recentrar</button>
+    </div>
+    <button id="vPrev" class="nav">‹</button>
+    <button id="vNext" class="nav">›</button>
+    <button id="vClose" title="Fechar (Esc)">✕</button>
+  </div>
+  <div id="vInfo">
+    <h3 id="vName"></h3>
+    <div id="vPath" class="muted"></div>
+    <table id="vTable"></table>
+    <div class="row"><button id="vFav">☆ Favorito</button><button id="vShow">Mostrar na pasta</button><button id="vRename">Renomear</button></div>
+    <label>Tags</label>
+    <div id="vTags"></div>
+    <div class="row"><input id="vTagIn" placeholder="nova tag + Enter" list="tagList"><datalist id="tagList"></datalist></div>
+    <label>Nota</label>
+    <textarea id="vNote" rows="4" placeholder="Observações (material, escala, suporte, origem…)"></textarea>
+  </div>
+</div>
+
+<!-- Diálogo genérico -->
+<div id="dlg" hidden>
+  <div class="box">
+    <h3 id="dlgTitle"></h3>
+    <div id="dlgBody"></div>
+    <div class="row end"><button id="dlgCancel">Cancelar</button><button id="dlgOk" class="primary">OK</button></div>
+  </div>
+</div>
+
+<!-- Duplicados -->
+<div id="dupPanel" hidden>
+  <div class="box wide">
+    <div class="row"><h3 id="dupTitle">Arquivos duplicados</h3><span style="flex:1"></span><button id="dupClose">Fechar</button></div>
+    <div id="dupBody"></div>
+    <div class="row end"><button id="dupAuto">Marcar todos menos o 1º de cada grupo</button><button id="dupTrash" class="danger">Mandar marcados para a lixeira</button></div>
+  </div>
+</div>
+
+<div id="menuMore" hidden>
+  <button data-m="csv">Exportar catálogo (CSV)</button>
+  <button data-m="regen">Tentar de novo os que deram erro</button>
+  <button data-m="clearMissing">Limpar itens ausentes do catálogo</button>
+  <button data-m="removeRoot">Remover uma pasta do catálogo…</button>
+</div>
+
+<script type="module" src="renderer.js"></script>
+</body>
+</html>
