@@ -1,0 +1,55 @@
+/* Ajustes para celular (Android) */
+html.mobile, html.mobile body { -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+html.mobile body { padding-top: env(safe-area-inset-top); }
+html.mobile { --card: 150px; }
+html.mobile button, html.mobile select, html.mobile input { min-height: 40px; }
+html.mobile #grid, html.mobile .card { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+html.mobile .card .star.off { opacity: .75; }
+html.mobile #tabs, html.mobile .zoom, html.mobile #btnRescan span { display: none; }
+html.mobile #btnMore { order: 4; }
+html.mobile [data-act="move"] { display: none; }
+
+#btnMenu { display: none; }
+html.mobile #btnMenu { display: inline-block; font-size: 20px; padding: 2px 12px; }
+html.mobile #top { flex-wrap: wrap; gap: 6px; padding: 6px 8px; }
+html.mobile #search { order: 3; flex: 1 1 100%; min-width: 0; }
+html.mobile #sort { flex: 1; min-width: 0; order: 5; }
+html.mobile #btnDup { order: 6; }
+html.mobile #btnAdd { flex: 1; }
+
+html.mobile #side { position: fixed; left: 0; top: 0; bottom: 0; width: 84vw; max-width: 340px; z-index: 40; transform: translateX(-102%); transition: transform .22s; box-shadow: 0 0 30px #000a; padding-top: calc(10px + env(safe-area-inset-top)); }
+html.mobile.drawer #side { transform: none; }
+#drawerBack { display: none; position: fixed; inset: 0; background: #0008; z-index: 39; }
+html.mobile.drawer #drawerBack { display: block; }
+html.mobile .item { padding: 10px 10px; }
+
+html.mobile #content { padding: 8px 8px 110px; }
+html.mobile #selbar { left: 8px; right: 8px; transform: none; flex-wrap: wrap; bottom: calc(40px + env(safe-area-inset-bottom)); justify-content: center; }
+html.mobile #menuMore { top: 56px; }
+html.mobile #status { padding-bottom: calc(5px + env(safe-area-inset-bottom)); }
+
+/* visualizador: modelo em cima, informações embaixo */
+html.mobile #viewer { flex-direction: column; }
+html.mobile #vStage { flex: 1 1 auto; min-height: 40vh; }
+html.mobile #vInfo { width: auto; max-height: 40vh; border-left: 0; border-top: 1px solid var(--line); padding: 10px 12px; }
+html.mobile #vTools { flex-wrap: wrap; right: 60px; left: 8px; top: calc(8px + env(safe-area-inset-top)); }
+html.mobile #vTools button { padding: 4px 9px; min-height: 34px; font-size: 13px; }
+html.mobile #vClose { top: calc(8px + env(safe-area-inset-top)); right: 8px; }
+html.mobile #vHint { display: none; }
+html.mobile .nav { opacity: .75; }
+html.mobile #vDims { left: 8px; bottom: 8px; font-size: 12px; }
+
+/* editor */
+html.mobile #editor { padding-top: env(safe-area-inset-top); }
+html.mobile #edTop { gap: 6px; padding: 6px 8px; }
+html.mobile #edTop button { padding: 4px 9px; font-size: 13px; min-height: 36px; }
+html.mobile #edTitle { flex: 1 1 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html.mobile #edBody { flex-direction: column; }
+html.mobile #edStage { flex: 1 1 auto; min-height: 36vh; }
+html.mobile #edPanel { width: auto; max-height: 44vh; border-right: 0; border-top: 1px solid var(--line); padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
+html.mobile #edViews { top: auto; bottom: 8px; right: 8px; }
+html.mobile #edViews button { padding: 4px 8px; min-height: 32px; font-size: 12px; }
+html.mobile #edInfo { font-size: 12px; max-width: 75%; }
+
+html.mobile .box { min-width: 0; width: 92vw; padding: 14px; }
+html.mobile #worker, html.mobile #thumbWorker { position: fixed; left: -400px; top: 0; width: 320px; height: 320px; border: 0; visibility: hidden; pointer-events: none; }

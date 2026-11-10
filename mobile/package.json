@@ -1,0 +1,14 @@
+{
+  "name": "catalogo-stl-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Catálogo STL para Android (Capacitor)",
+  "scripts": {
+    "prepare-www": "node build-www.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/cli": "^6.2.0",
+    "@capacitor/core": "^6.2.0"
+  }
+}

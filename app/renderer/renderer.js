@@ -21,7 +21,7 @@ const fmtSize = (b) => (b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.ma
 const fmtNum = (n) => Number(n).toLocaleString('pt-BR');
 const strip = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const thumbUrl = (e) => 'file:///' + (state.thumbsDir + '/' + e.id + '.jpg').replace(/\\/g, '/').replace(/^\/+/, '') + '?t=' + (e.thumbAt || 0);
+const thumbUrl = (e) => (api.thumbUrl ? api.thumbUrl(e) : 'file:///' + (state.thumbsDir + '/' + e.id + '.jpg').replace(/\\/g, '/').replace(/^\/+/, '') + '?t=' + (e.thumbAt || 0));
 const normP = (p) => (sep === '\\' ? p.toLowerCase() : p);
 const maxDim = (e) => (e.meta && !e.meta.error ? Math.max(e.meta.dx || 0, e.meta.dy || 0, e.meta.dz || 0) : 0);
 const hasThumb = (e) => !!(e.meta && !e.meta.error && e.meta.thumb !== false);

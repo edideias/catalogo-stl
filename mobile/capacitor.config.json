@@ -1,0 +1,7 @@
+{
+  "appId": "com.edideias.catalogostl",
+  "appName": "Catálogo STL",
+  "webDir": "www",
+  "backgroundColor": "#14161b",
+  "android": { "allowMixedContent": false }
+}
